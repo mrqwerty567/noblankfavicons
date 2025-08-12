@@ -1,10 +1,10 @@
-# noblankfavicons - how to install (if using GitHub)
+# noblankfavicons - how to install
 
 1. Download the latest release.
 2. Extract the `noblankfavicons.zip` file somewhere on your machine.
 3. Open Chrome and go to `chrome://extensions/`.
 4. Toggle **Developer mode** on (top-right).
-5. Click **Load unpacked** and select the `noblankfavicons/` folder.
+5. Click **Load unpacked** and select the `extension` folder, within the `noblankfavicons` foldier.
 6. Visit any website that has no favicon (or remove the `link[rel~='icon']` tags in devtools) and verify the generated favicon appears. [https://example.com] is a great website to test, as it has no favicon.
 
 Notes:
