@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Identicon Playground</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#0b1220}
+    body{margin:24px;background:#f7f9fb}
+    .card{background:#fff;padding:18px;border-radius:12px;box-shadow:0 6px 20px rgba(12,18,28,.06);max-width:980px;margin:0 auto}
+    header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+    h1{font-size:20px;margin:0}
+    label{font-size:13px;color:#4b5563}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    input[type="text"]{padding:8px 10px;border:1px solid #e6e9ee;border-radius:8px;min-width:260px}
+    input[type="range"]{width:180px}
+    button{background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{background:#e6eefb;color:#16427a}
+    .row{display:flex;gap:12px;align-items:center;margin-top:12px}
+    .preview{display:grid;grid-template-columns:repeat(auto-fit, minmax(80px, 1fr));gap:12px;margin-top:16px}
+    .tile{background:#f3f6fb;border-radius:8px;padding:12px;display:flex;flex-direction:column;align-items:center;gap:8px}
+    small{color:#6b7280}
+    .grid-canvas{width:var(--w);height:var(--h);image-rendering:pixelated;border-radius:6px;background:transparent}
+    textarea{width:100%;min-height:56px;border-radius:8px;padding:8px;border:1px solid #e6e9ee}
+    footer{margin-top:16px;color:#6b7280;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>Identicon Playground</h1>
+      <div style="margin-left:auto"><small>Deterministic 5×5 identicons (same algorithm as the extension)</small></div>
+    </header>
+
+    <div class="controls" role="group" aria-label="controls">
+      <label>
+        Seed or URL
+        <input id="seedInput" type="text" placeholder="example.com or custom seed" value="example.com">
+      </label>
+
+      <label>
+        Size: <span id="sizeLabel">64</span>px
+        <input id="sizeRange" type="range" min="16" max="256" value="64">
+      </label>
+
+      <button id="genBtn">Generate</button>
+      <button id="downloadBtn" class="secondary">Download PNG</button>
+      <button id="gridBtn" class="secondary">Generate Grid</button>
+    </div>
+
+    <div class="row">
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
+        <canvas id="previewCanvas" class="grid-canvas" style="--w:64px;--h:64px" width="64" height="64"></canvas>
+        <small id="previewSeed">seed: example.com</small>
+      </div>
+
+      <div style="flex:1 1 0">
+        <label>
+          Data URL (PNG)
+          <textarea id="dataUrl" readonly></textarea>
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>
+        Example seeds
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <button class="example">example.com</button>
+          <button class="example">github.com</button>
+          <button class="example">mozilla.org</button>
+          <button class="example">localhost</button>
+          <button class="example">user@example.com</button>
+        </div>
+      </label>
+    </div>
+
+    <div class="preview" id="gridArea" aria-live="polite" style="display:none;margin-top:18px"></div>
+
+    <footer>
+      Tip: paste a URL like <code>https://news.example.com/path</code> into the seed field; the tool will use the hostname to keep icons stable per host.
+    </footer>
+  </div>
+
+  <script>
+  // --- identicon algorithm (same as extension) ---
+  // xfnv1a -> 32-bit hash
+  function xfnv1a(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  // mulberry32 PRNG seeded by 32-bit int
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+
+  // Generate identicon into a canvas and return the canvas element
+  // grid is 5x5 symmetric blocks; background is transparent
+  function generateIdenticonCanvas(seed, size) {
+    // normalize seed
+    const s = (seed || '').toString();
+    const hash = xfnv1a(s);
+    const rand = mulberry32(hash);
+
+    // choose HSL color
+    const hue = Math.floor(rand() * 360);
+    const sat = 60 + Math.floor(rand() * 20);
+    const light = 40 + Math.floor(rand() * 20);
+    const fg = `hsl(${hue}, ${sat}%, ${light}%)`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+
+    const cells = 5;
+    const cell = Math.ceil(size / cells);
+    const padding = Math.floor(cell * 0.1);
+
+    ctx.fillStyle = fg;
+    for (let x = 0; x < Math.ceil(cells / 2); x++) {
+      for (let y = 0; y < cells; y++) {
+        const v = rand();
+        if (v > 0.5) {
+          const sx = x * cell + padding;
+          const sy = y * cell + padding;
+          const w = cell - padding * 2;
+          const h = cell - padding * 2;
+          ctx.fillRect(sx, sy, w, h);
+          // mirror
+          const mx = (cells - 1 - x) * cell + padding;
+          ctx.fillRect(mx, sy, w, h);
+        }
+      }
+    }
+    return canvas;
+  }
+
+  // utility: try to extract hostname if user pasted URL
+  function extractHostname(input) {
+    try {
+      // try as URL
+      if (/^https?:\/\//i.test(input)) {
+        return new URL(input).hostname;
+      }
+      // allow user to paste just hostname
+      return input.trim();
+    } catch (e) {
+      return input.trim();
+    }
+  }
+
+  // --- UI wiring ---
+  const seedInput = document.getElementById('seedInput');
+  const sizeRange = document.getElementById('sizeRange');
+  const sizeLabel = document.getElementById('sizeLabel');
+  const genBtn = document.getElementById('genBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const previewCanvas = document.getElementById('previewCanvas');
+  const previewSeed = document.getElementById('previewSeed');
+  const dataUrlField = document.getElementById('dataUrl');
+  const exampleBtns = document.querySelectorAll('.example');
+  const gridBtn = document.getElementById('gridBtn');
+  const gridArea = document.getElementById('gridArea');
+
+  function renderPreview() {
+    const raw = seedInput.value || '';
+    const seed = extractHostname(raw);
+    const size = parseInt(sizeRange.value, 10) || 64;
+
+    // set canvas size attributes and CSS vars for crisp pixelated look when scaled
+    previewCanvas.width = size;
+    previewCanvas.height = size;
+    previewCanvas.style.setProperty('--w', size + 'px');
+    previewCanvas.style.setProperty('--h', size + 'px');
+
+    const iconCanvas = generateIdenticonCanvas(seed, size);
+    const ctx = previewCanvas.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    ctx.drawImage(iconCanvas, 0, 0, size, size);
+
+    previewSeed.textContent = 'seed: ' + seed;
+    const dataUrl = previewCanvas.toDataURL('image/png');
+    dataUrlField.value = dataUrl;
+  }
+
+  genBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    renderPreview();
+    gridArea.style.display = 'none';
+  });
+
+  sizeRange.addEventListener('input', () => {
+    sizeLabel.textContent = sizeRange.value;
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    const dataUrl = dataUrlField.value;
+    if (!dataUrl) {
+      alert('Generate an identicon first.');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = (extractHostname(seedInput.value) || 'identicon') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
+  exampleBtns.forEach(b => b.addEventListener('click', () => {
+    seedInput.value = b.textContent;
+    renderPreview();
+  }));
+
+  // grid generator: takes a comma-separated list or uses a set of hosts
+  gridBtn.addEventListener('click', () => {
+    const raw = seedInput.value.trim();
+    let seeds = [];
+    if (raw.includes(',')) {
+      seeds = raw.split(',').map(s => extractHostname(s.trim())).filter(Boolean);
+    } else if (raw) {
+      // generate variants and some common subdomains
+      const base = extractHostname(raw);
+      seeds = [base, 'www.'+base, 'blog.'+base, 'mail.'+base, 'api.'+base];
+    } else {
+      seeds = ['example.com','github.com','mozilla.org','google.com','localhost','myapp.test'];
+    }
+
+    gridArea.innerHTML = '';
+    gridArea.style.display = 'grid';
+    gridArea.style.gridTemplateColumns = 'repeat(auto-fit, minmax(120px, 1fr))';
+    const size = 64;
+
+    seeds.forEach(seed => {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      const c = generateIdenticonCanvas(seed, size);
+      c.className = 'grid-canvas';
+      c.style.width = '80px';
+      c.style.height = '80px';
+      const label = document.createElement('small');
+      label.textContent = seed;
+      const btn = document.createElement('button');
+      btn.textContent = 'Use';
+      btn.style.marginTop = '6px';
+      btn.addEventListener('click', () => {
+        seedInput.value = seed;
+        renderPreview();
+        window.scrollTo({top:0, behavior:'smooth'});
+      });
+      tile.appendChild(c);
+      tile.appendChild(label);
+      tile.appendChild(btn);
+      gridArea.appendChild(tile);
+    });
+
+    // update data URL for the preview seed if empty
+    if (!dataUrlField.value) renderPreview();
+  });
+
+  // initial render
+  renderPreview();
+  </script>
+</body>
+</html>
